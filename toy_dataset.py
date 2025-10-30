@@ -1,14 +1,18 @@
 from dataset_creation import load_dataset
 from hmmlearn import hmm
 
-datasets = load_dataset("../processed_data")
+datasets = load_dataset()
 X_train = datasets["train"]
 X_test = datasets["test"]
 X_valid = datasets["valid"]
 
 
 model = hmm.CategoricalHMM(
-    n_states=16384, n_iter=100, n_clusters=128, algorithm="map", implementation="scaling", random_state=42
+    n_states=16384 // 2,
+    n_iter=100,
+    n_clusters=512,
+    implementation="scaling",
+    random_state=42,
 )
 
 
