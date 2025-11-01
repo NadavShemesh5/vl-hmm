@@ -48,7 +48,7 @@ class CategoricalHMM(BaseEstimator):
         startprob_prior=1e-6,
         transmat_prior=1e-6,
         *,
-        emissionprob_prior=0,
+        emissionprob_prior=1e-6,
         algorithm="viterbi",
         random_state=None,
         n_iter=10,
@@ -58,6 +58,7 @@ class CategoricalHMM(BaseEstimator):
         init_params="ste",
         implementation="log",
         n_clusters=1,
+        dropout_rate=0.0,
     ):
         """
         Parameters
@@ -135,6 +136,7 @@ class CategoricalHMM(BaseEstimator):
             "n_components must be divisible by n_clusters"
         )
         self.clusters_offset = None
+        self.dropout_rate = dropout_rate
 
     def score_samples(self, X, lengths=None):
         """
@@ -465,8 +467,8 @@ class CategoricalHMM(BaseEstimator):
                 perplexity = self.perplexity(valid, valid_lengths)
                 print(f"Valid Perplexity: {perplexity}")
 
-            if self.monitor_.converged:
-                break
+            # if self.monitor_.converged:
+            #     break
 
             if (self.transmat_.sum(axis=1) == 0).any():
                 _log.warning(
@@ -475,8 +477,17 @@ class CategoricalHMM(BaseEstimator):
                 )
         return self
 
+    def _choose_active(self, frameprob, X, dropout_rate):
+        unique_vals, inverse_indices = np.unique(X, return_inverse=True)
+        unique_masks = np.random.rand(len(unique_vals), frameprob.shape[1]) <= dropout_rate
+        mask = unique_masks[inverse_indices.ravel(), :]
+        frameprob[mask] = 0
+
     def _fit_scaling(self, X, clusters_offset):
         frameprob = self._compute_likelihood(X)
+        if self.monitor_.iter % 2 == 1:
+            self._choose_active(frameprob, X, self.dropout_rate)
+
         log_prob, fwdlattice, scaling_factors = _hmmc.forward_scaling(
             self.startprob_, self.transmat_, frameprob, clusters_offset
         )
@@ -860,9 +871,8 @@ class CategoricalHMM(BaseEstimator):
             normalize_by_indexes(self.startprob_, self.cluster2states)
 
         if self._needs_init("t", "transmat_"):
-            # alpha = 1e-3
-            # init = 1.0 / self.n_states + alpha
-            init = 1.0
+            alpha = 1e-3
+            init = 1.0 / self.n_states + alpha
             self.transmat_ = random_state.dirichlet(
                 np.full(self.n_states, init), size=self.n_states
             )

@@ -1,5 +1,5 @@
 from dataset_creation_brown import load_dataset
-from hmmlearn import hmm_brown
+from hmmlearn import hmm_brown_dropout_experiment
 
 datasets = load_dataset()
 X_train = datasets["train"]
@@ -7,8 +7,8 @@ X_test = datasets["test"]
 X_valid = datasets["valid"]
 token2cluster_arr = datasets["vocab"]["token2cluster_arr"]
 
-model = hmm_brown.CategoricalHMM(
-    n_states=16384 // 4,
+model = hmm_brown_dropout_experiment.CategoricalHMM(
+    n_states=16384,
     n_iter=100,
     implementation="scaling",
     random_state=1,

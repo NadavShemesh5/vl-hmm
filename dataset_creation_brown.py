@@ -36,6 +36,34 @@ def download_wikitext2(data_dir="./data"):
     return data_dir
 
 
+# def read_file(filepath):
+#     """Read and preprocess WikiText file"""
+#     with open(filepath, "r", encoding="utf-8") as f:
+#         lines = f.readlines()
+#
+#     paragraphs = []
+#     curr_sentences = []
+#     for line in lines:
+#         line = line.strip()
+#         if not line:
+#             continue
+#
+#         if line.startswith("="):
+#             curr_paragraph = " ".join(curr_sentences)
+#             if curr_paragraph:
+#                 paragraphs.append(curr_paragraph)
+#             curr_sentences = []
+#             continue
+#
+#         curr_sentences.append(line)
+#
+#     curr_paragraph = " ".join(curr_sentences)
+#     if curr_paragraph:
+#         paragraphs.append(curr_paragraph)
+#
+#     return paragraphs
+
+
 def read_file(filepath):
     """Read and preprocess WikiText file"""
     with open(filepath, "r") as f:

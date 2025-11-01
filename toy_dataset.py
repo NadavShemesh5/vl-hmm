@@ -8,11 +8,12 @@ X_valid = datasets["valid"]
 
 
 model = hmm.CategoricalHMM(
-    n_states=16384 // 2,
+    n_states=16384,
     n_iter=100,
-    n_clusters=512,
+    n_clusters=128,
     implementation="scaling",
-    random_state=42,
+    random_state=1,
+    dropout_rate=0.5,
 )
 
 

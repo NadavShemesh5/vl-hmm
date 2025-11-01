@@ -197,7 +197,7 @@ def save_dataset(dataset, save_dir="./processed_data"):
     print(f"\nDataset saved to {save_dir}/")
 
 
-def load_dataset(save_dir="../processed_data"):
+def load_dataset(save_dir="./processed_data"):
     """Load processed dataset from disk"""
     dataset = {
         "train": {
