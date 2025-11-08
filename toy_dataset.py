@@ -12,7 +12,7 @@ model = hmm.CategoricalHMM(
     n_iter=100,
     n_clusters=128,
     implementation="scaling",
-    random_state=1,
+    random_state=42,
     dropout_rate=0.5,
 )
 

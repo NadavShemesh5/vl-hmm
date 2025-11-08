@@ -459,7 +459,6 @@ class CategoricalHMM(BaseEstimator):
             # XXX must be before convergence check, because otherwise
             #     there won't be any updates for the case ``n_iter=1``.
             self._do_mstep(stats)
-            self.monitor_.report(curr_logprob)
 
             perplexity = self.perplexity(X, lengths)
             print(f"Train Perplexity: {perplexity}")
@@ -467,6 +466,7 @@ class CategoricalHMM(BaseEstimator):
                 perplexity = self.perplexity(valid, valid_lengths)
                 print(f"Valid Perplexity: {perplexity}")
 
+            self.monitor_.report(curr_logprob)
             # if self.monitor_.converged:
             #     break
 
@@ -485,8 +485,7 @@ class CategoricalHMM(BaseEstimator):
 
     def _fit_scaling(self, X, clusters_offset):
         frameprob = self._compute_likelihood(X)
-        if self.monitor_.iter % 2 == 1:
-            self._choose_active(frameprob, X, self.dropout_rate)
+        self._choose_active(frameprob, X, self.dropout_rate)
 
         log_prob, fwdlattice, scaling_factors = _hmmc.forward_scaling(
             self.startprob_, self.transmat_, frameprob, clusters_offset

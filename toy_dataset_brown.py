@@ -8,10 +8,10 @@ X_valid = datasets["valid"]
 token2cluster_arr = datasets["vocab"]["token2cluster_arr"]
 
 model = hmm_brown.CategoricalHMM(
-    n_states=16384 // 4,
+    n_states=16384,
     n_iter=100,
     implementation="scaling",
-    random_state=1,
+    random_state=42,
     dropout_rate=0.5,
 )
 

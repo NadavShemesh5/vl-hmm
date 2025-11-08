@@ -11,7 +11,7 @@ model = hmm_brown_dropout_experiment.CategoricalHMM(
     n_states=16384,
     n_iter=100,
     implementation="scaling",
-    random_state=1,
+    random_state=42,
     dropout_rate=0.5,
 )
 

@@ -106,30 +106,31 @@ std::tuple<double, py::array_t<double>, py::array_t<double>> forward_scaling(
 std::tuple<double, py::array_t<double>> forward_log(
   py::array_t<double> startprob_,
   py::array_t<double> transmat_,
-  py::array_t<double> log_frameprob_)
+  py::array_t<double> log_frameprob_,
+  py::array_t<int> clusters_offset_)
 {
   auto log_startprob_ = log(startprob_);
   auto log_startprob = log_startprob_.unchecked<1>();
   auto log_transmat_ = log(transmat_);
   auto log_transmat = log_transmat_.unchecked<2>();
   auto log_frameprob = log_frameprob_.unchecked<2>();
+  auto clusters_offset = clusters_offset_.unchecked<1>();
   auto ns = log_frameprob.shape(0), nc = log_frameprob.shape(1);
-  if (log_startprob.shape(0) != nc
-      || log_transmat.shape(0) != nc || log_transmat.shape(1) != nc) {
-    throw std::invalid_argument{"shape mismatch"};
-  }
   auto buf = std::vector<double>(nc);
   auto fwdlattice_ = py::array_t<double>{{ns, nc}};
   auto fwd = fwdlattice_.mutable_unchecked<2>();
   {
     py::gil_scoped_release nogil;
+    auto offset = clusters_offset(0);
     for (auto i = 0; i < nc; ++i) {
-      fwd(0, i) = log_startprob(i) + log_frameprob(0, i);
+      fwd(0, i) = log_startprob(offset + i) + log_frameprob(0, i);
     }
     for (auto t = 1; t < ns; ++t) {
+      auto offset = clusters_offset(t);
+      auto prev_offset = clusters_offset(t - 1);
       for (auto j = 0; j < nc; ++j) {
         for (auto i = 0; i < nc; ++i) {
-          buf[i] = fwd(t - 1, i) + log_transmat(i, j);
+          buf[i] = fwd(t - 1, i) + log_transmat(prev_offset + i, offset + j);
         }
         fwd(t, j) = logsumexp(buf.data(), nc) + log_frameprob(t, j);
       }
@@ -175,18 +176,16 @@ py::array_t<double> backward_scaling(
 py::array_t<double> backward_log(
   py::array_t<double> startprob_,
   py::array_t<double> transmat_,
-  py::array_t<double> log_frameprob_)
+  py::array_t<double> log_frameprob_,
+  py::array_t<int> clusters_offset_)
 {
   auto log_startprob_ = log(startprob_);
   auto log_startprob = log_startprob_.unchecked<1>();
   auto log_transmat_ = log(transmat_);
   auto log_transmat = log_transmat_.unchecked<2>();
   auto log_frameprob = log_frameprob_.unchecked<2>();
+  auto clusters_offset = clusters_offset_.unchecked<1>();
   auto ns = log_frameprob.shape(0), nc = log_frameprob.shape(1);
-  if (log_startprob.shape(0) != nc
-      || log_transmat.shape(0) != nc || log_transmat.shape(1) != nc) {
-    throw std::invalid_argument{"shape mismatch"};
-  }
   auto buf = std::vector<double>(nc);
   auto bwdlattice_ = py::array_t<double>{{ns, nc}};
   auto bwd = bwdlattice_.mutable_unchecked<2>();
@@ -195,9 +194,11 @@ py::array_t<double> backward_log(
     bwd(ns - 1, i) = 0;
   }
   for (auto t = ns - 2; t >= 0; --t) {
+    auto offset = clusters_offset(t);
+    auto next_offset = clusters_offset(t + 1);
     for (auto i = 0; i < nc; ++i) {
       for (auto j = 0; j < nc; ++j) {
-        buf[j] = log_transmat(i, j) + log_frameprob(t + 1, j) + bwd(t + 1, j);
+        buf[j] = log_transmat(offset + i, next_offset + j) + log_frameprob(t + 1, j) + bwd(t + 1, j);
       }
       bwd(t, i) = logsumexp(buf.data(), nc);
     }
@@ -235,42 +236,38 @@ void compute_scaling_xi_sum(
   }
 }
 
-py::array_t<double> compute_log_xi_sum(
+void compute_log_xi_sum(
   py::array_t<double> fwdlattice_,
   py::array_t<double> transmat_,
   py::array_t<double> bwdlattice_,
-  py::array_t<double> log_frameprob_)
+  py::array_t<double> log_frameprob_,
+  py::array_t<double> xi_sum_,
+  py::array_t<int> clusters_offset_)
 {
   auto fwd = fwdlattice_.unchecked<2>();
   auto log_transmat_ = log(transmat_);
   auto log_transmat = log_transmat_.unchecked<2>();
   auto bwd = bwdlattice_.unchecked<2>();
   auto log_frameprob = log_frameprob_.unchecked<2>();
+  auto clusters_offset = clusters_offset_.unchecked<1>();
   auto ns = log_frameprob.shape(0), nc = log_frameprob.shape(1);
-  if (fwd.shape(0) != ns || fwd.shape(1) != nc
-      || log_transmat.shape(0) != nc || log_transmat.shape(1) != nc
-      || bwd.shape(0) != ns || bwd.shape(1) != nc) {
-    throw std::invalid_argument{"shape mismatch"};
-  }
   auto log_prob = logsumexp(&fwd(ns - 1, 0), nc);
-  auto log_xi_sum_ = py::array_t<double>{{nc, nc}};
-  auto log_xi_sum = log_xi_sum_.mutable_unchecked<2>();
-  std::fill_n(log_xi_sum.mutable_data(0, 0), log_xi_sum.size(),
-              -std::numeric_limits<double>::infinity());
+  auto log_xi_sum = xi_sum_.mutable_unchecked<2>();
   py::gil_scoped_release nogil;
   for (auto t = 0; t < ns - 1; ++t) {
+    auto offset = clusters_offset(t);
+    auto next_offset = clusters_offset(t + 1);
     for (auto i = 0; i < nc; ++i) {
       for (auto j = 0; j < nc; ++j) {
         auto log_xi = fwd(t, i)
-                      + log_transmat(i, j)
+                      + log_transmat(offset + i, next_offset + j)
                       + log_frameprob(t + 1, j)
                       + bwd(t + 1, j)
                       - log_prob;
-        log_xi_sum(i, j) = logaddexp(log_xi_sum(i, j), log_xi);
+        log_xi_sum(offset + i, next_offset + j) = logaddexp(log_xi_sum(offset + i, next_offset + j), log_xi);
       }
     }
   }
-  return log_xi_sum_;
 }
 
 std::tuple<double, py::array_t<ssize_t>> viterbi(

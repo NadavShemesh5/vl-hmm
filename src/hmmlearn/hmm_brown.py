@@ -266,6 +266,10 @@ class CategoricalHMM(BaseEstimator):
         mask = unique_masks[inverse_indices.ravel(), :]
         frameprob[mask] = 0
 
+    def _choose_active_full(self, mat, dropout_rate):
+        mask  = np.random.rand(*mat.shape) <= dropout_rate
+        mat[mask] = 0
+
     def _decode_viterbi(self, X):
         log_frameprob = self._compute_log_likelihood(X)
         return _hmmc.viterbi(self.startprob_, self.transmat_, log_frameprob)
@@ -457,6 +461,7 @@ class CategoricalHMM(BaseEstimator):
 
 
         for _ in range(self.n_iter):
+            # self._choose_active_full(self.emissionprob_, self.dropout_rate)
             stats, curr_logprob = self._do_estep(X, lengths)
 
             # XXX must be before convergence check, because otherwise
@@ -482,7 +487,6 @@ class CategoricalHMM(BaseEstimator):
 
     def _fit_scaling(self, X, clusters_offset):
         frameprob = self._compute_likelihood(X)
-
         self._choose_active(frameprob, X, self.dropout_rate)
 
         log_prob, fwdlattice, scaling_factors = _hmmc.forward_scaling(
@@ -752,11 +756,9 @@ class CategoricalHMM(BaseEstimator):
             if n_samples <= 1:
                 return
 
-            log_xi_sum = _hmmc.compute_log_xi_sum(
-                fwdlattice, self.transmat_, bwdlattice, lattice, clusters_offset
+            _hmmc.compute_log_xi_sum(
+                fwdlattice, self.transmat_, bwdlattice, lattice, stats["trans"], clusters_offset
             )
-            with np.errstate(under="ignore"):
-                stats["trans"] += np.exp(log_xi_sum)
 
     def _do_mstep(self, stats):
         """

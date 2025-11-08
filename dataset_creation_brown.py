@@ -82,7 +82,7 @@ def read_file(filepath):
 
 def tokenize(sentences):
     sentences = [sentence.split() + ["<eos>"] for sentence in sentences]
-    corpus = BigramCorpus(sentences, alpha=0.5, min_count=0)
+    corpus = BigramCorpus(sentences)
     clustering = BrownClustering(corpus, m=128)
     clusters = clustering.train()
     return clusters
