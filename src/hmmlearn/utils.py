@@ -66,14 +66,3 @@ def log_normalize(a, axis=None):
         with np.errstate(under="ignore"):
             a_lse = special.logsumexp(a, axis, keepdims=True)
         a -= a_lse
-
-# def log_normalize_by_indexes_1(a, indexes, axis=None):
-#     for idx in indexes:
-#         if axis is not None and a[idx, ...].shape[axis] == 1:
-#             # Handle single-state GMMHMM in the degenerate case normalizing a
-#             # single -inf to zero.
-#             a[idx, ...][:] = 0
-#         else:
-#             with np.errstate(under="ignore"):
-#                 a_lse = special.logsumexp(a[idx, ...], axis, keepdims=True)
-#             a[idx, ...] -= a_lse

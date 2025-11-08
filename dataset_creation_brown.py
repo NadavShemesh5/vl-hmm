@@ -1,12 +1,8 @@
 import os
 
-import random
 import numpy as np
 import urllib.request
-from collections import Counter
-
-
-special_tokens = ["<unk>", "<eos>"]
+from brown_clustering import BigramCorpus, BrownClustering
 
 
 def download_wikitext2(data_dir="./data"):
@@ -84,21 +80,12 @@ def read_file(filepath):
     return sentences
 
 
-# from mosestokenizer import MosesTokenizer
-# tokenizer = MosesTokenizer(lang="en")
-# def tokenize(text):
-#     tokens = tokenizer(text)
-#     return tokens
-
-
-# def tokenize(text):
-#     tokens = text.lower().split()
-#     return tokens
-
-
-def tokenize(text):
-    tokens = text.split()
-    return tokens
+def tokenize(sentences):
+    sentences = [sentence.split() + ["<eos>"] for sentence in sentences]
+    corpus = BigramCorpus(sentences)
+    clustering = BrownClustering(corpus, m=128)
+    clusters = clustering.train()
+    return clusters
 
 
 def encode_paragraphs(paragraphs, token2idx):
@@ -117,14 +104,9 @@ def encode_paragraphs(paragraphs, token2idx):
     sentence_lengths = []
 
     unk_idx = token2idx["<unk>"]
-    eos_idx = token2idx["<eos>"]
-
     for paragraph in paragraphs:
-        tokens = tokenize(paragraph)
-        # Convert tokens to indices
+        tokens = paragraph.split() + ["<eos>"]
         indices = [token2idx.get(token, unk_idx) for token in tokens]
-        # Add EOS token at the end
-        indices.append(eos_idx)
 
         all_tokens.extend(indices)
         sentence_lengths.append(len(indices))
@@ -142,41 +124,26 @@ def build_vocab(texts):
         texts: List of text strings
     """
     print("Building vocabulary...")
-
-    # Count all tokens
-    token_counter = Counter()
-    for text in texts:
-        tokens = tokenize(text)
-        token_counter.update(tokens)
-
-    # token2idx = {}
-    # # Add special tokens first
-    # for token in special_tokens:
-    #     token2idx[token] = len(token2idx)
-    #
-    # # Add tokens to vocabulary
-    # for token in token_counter:
-    #     if token in special_tokens:
-    #         continue
-    #
-    #     token2idx[token] = len(token2idx)
-
-    token_counter.update(special_tokens)
-    tokens = list(token_counter.keys())
-    random.shuffle(tokens)
+    clusters = tokenize(texts)
 
     token2idx = {}
-    # Add tokens to vocabulary
-    for token in tokens:
-        token2idx[token] = len(token2idx)
+    token2cluster = {}
+    counter = 0
+    for cluster, words in enumerate(clusters):
+        for word in words:
+            token2idx[word] = counter
+            token2cluster[counter] = cluster
+            counter += 1
 
-    # Create reverse mapping
+    token2cluster_arr = np.zeros(len(token2idx), dtype=np.int32)
+    for token, idx in token2idx.items():
+        token2cluster_arr[idx] = token2cluster[idx]
+
     idx2token = {idx: token for token, idx in token2idx.items()}
+    return token2idx, idx2token, token2cluster_arr
 
-    return token2idx, idx2token
 
-
-def save_dataset(dataset, save_dir="./processed_data"):
+def save_dataset(dataset, save_dir="./processed_data_brown"):
     """Save processed dataset to disk"""
     os.makedirs(save_dir, exist_ok=True)
 
@@ -193,11 +160,15 @@ def save_dataset(dataset, save_dir="./processed_data"):
     # Save vocabulary
     np.save(os.path.join(save_dir, "token2idx.npy"), dataset["vocab"]["token2idx"])
     np.save(os.path.join(save_dir, "idx2token.npy"), dataset["vocab"]["idx2token"])
+    np.save(
+        os.path.join(save_dir, "token2cluster_arr.npy"),
+        dataset["vocab"]["token2cluster_arr"],
+    )
 
     print(f"\nDataset saved to {save_dir}/")
 
 
-def load_dataset(save_dir="./processed_data"):
+def load_dataset(save_dir="./processed_data_brown"):
     """Load processed dataset from disk"""
     dataset = {
         "train": {
@@ -219,6 +190,9 @@ def load_dataset(save_dir="./processed_data"):
             "idx2token": np.load(
                 os.path.join(save_dir, "idx2token.npy"), allow_pickle=True
             ).item(),
+            "token2cluster_arr": np.load(
+                os.path.join(save_dir, "token2cluster_arr.npy"), allow_pickle=True
+            ),
         },
     }
 
@@ -243,7 +217,7 @@ if __name__ == "__main__":
     print(f"Test paragraphs: {len(test_paragraphs)}")
 
     # Build vocabulary from training data only
-    token2idx, idx2token = build_vocab(train_paragraphs)
+    token2idx, idx2token, token2cluster_arr = build_vocab(train_paragraphs)
 
     # Encode all splits
     print("\nEncoding train set...")
@@ -271,6 +245,10 @@ if __name__ == "__main__":
             "train": {"tokens": train_tokens, "lengths": train_lengths},
             "valid": {"tokens": valid_tokens, "lengths": valid_lengths},
             "test": {"tokens": test_tokens, "lengths": test_lengths},
-            "vocab": {"token2idx": token2idx, "idx2token": idx2token},
+            "vocab": {
+                "token2idx": token2idx,
+                "idx2token": idx2token,
+                "token2cluster_arr": token2cluster_arr,
+            },
         }
     )

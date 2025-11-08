@@ -57,7 +57,6 @@ class CategoricalHMM(BaseEstimator):
         params="ste",
         init_params="ste",
         implementation="log",
-        n_clusters=1,
         dropout_rate=0.0,
     ):
         """
@@ -113,7 +112,6 @@ class CategoricalHMM(BaseEstimator):
             logarithms ("log"), or using scaling ("scaling").  The default is
             to use logarithms for backwards compatability.
 
-        n_clusters : int, optional
         """
 
         self.n_states = n_states
@@ -131,11 +129,9 @@ class CategoricalHMM(BaseEstimator):
         self.emissionprob_prior = emissionprob_prior
         self.n_tokens = None
         self.n_emit_components = None
-        self.n_clusters = n_clusters
-        assert self.n_states % self.n_clusters == 0, (
-            "n_components must be divisible by n_clusters"
-        )
+        self.n_clusters = None
         self.clusters_offset = None
+        assert 0 <= dropout_rate < 1, "dropout_rate must be in [0, 1)"
         self.dropout_rate = dropout_rate
 
     def score_samples(self, X, lengths=None):
@@ -263,6 +259,16 @@ class CategoricalHMM(BaseEstimator):
                 )
 
         return log_prob, np.concatenate(sub_posteriors)
+
+    def _choose_active(self, frameprob, X, dropout_rate):
+        unique_vals, inverse_indices = np.unique(X, return_inverse=True)
+        unique_masks = np.random.rand(len(unique_vals), frameprob.shape[1]) <= dropout_rate
+        mask = unique_masks[inverse_indices.ravel(), :]
+        frameprob[mask] = 0
+
+    def _choose_active_full(self, mat, dropout_rate):
+        mask  = np.random.rand(*mat.shape) <= dropout_rate
+        mat[mask] = 0
 
     def _decode_viterbi(self, X):
         log_frameprob = self._compute_log_likelihood(X)
@@ -423,7 +429,7 @@ class CategoricalHMM(BaseEstimator):
 
         return np.atleast_2d(X), np.array(state_sequence, dtype=int)
 
-    def fit(self, X, lengths=None, valid=None, valid_lengths=None):
+    def fit(self, X, lengths, token2cluster, valid=None, valid_lengths=None):
         """
         Estimate model parameters.
 
@@ -449,11 +455,13 @@ class CategoricalHMM(BaseEstimator):
         if lengths is None:
             lengths = np.asarray([X.shape[0]])
 
-        self._init(X, lengths)
+        self._init(X, lengths, token2cluster)
         self._check()
         self.monitor_._reset()
 
+
         for _ in range(self.n_iter):
+            # self._choose_active_full(self.emissionprob_, self.dropout_rate)
             stats, curr_logprob = self._do_estep(X, lengths)
 
             # XXX must be before convergence check, because otherwise
@@ -476,12 +484,6 @@ class CategoricalHMM(BaseEstimator):
                     "transition from the state was ever observed."
                 )
         return self
-
-    def _choose_active(self, frameprob, X, dropout_rate):
-        unique_vals, inverse_indices = np.unique(X, return_inverse=True)
-        unique_masks = np.random.rand(len(unique_vals), frameprob.shape[1]) <= dropout_rate
-        mask = unique_masks[inverse_indices.ravel(), :]
-        frameprob[mask] = 0
 
     def _fit_scaling(self, X, clusters_offset):
         frameprob = self._compute_likelihood(X)
@@ -754,11 +756,9 @@ class CategoricalHMM(BaseEstimator):
             if n_samples <= 1:
                 return
 
-            log_xi_sum = _hmmc.compute_log_xi_sum(
-                fwdlattice, self.transmat_, bwdlattice, lattice, clusters_offset
+            _hmmc.compute_log_xi_sum(
+                fwdlattice, self.transmat_, bwdlattice, lattice, stats["trans"], clusters_offset
             )
-            with np.errstate(under="ignore"):
-                stats["trans"] += np.exp(log_xi_sum)
 
     def _do_mstep(self, stats):
         """
@@ -800,6 +800,7 @@ class CategoricalHMM(BaseEstimator):
             lattice, logprob, posteriors, fwdlattice, bwdlattice = impl(
                 sub_X, clusters_offset
             )
+
             # Derived HMM classes will implement the following method to
             # update their probability distributions, so keep
             # a single call to this method for simplicity.
@@ -825,7 +826,7 @@ class CategoricalHMM(BaseEstimator):
         eigvec = np.real_if_close(eigvecs[:, np.argmax(eigvals)])
         return eigvec / eigvec.sum()
 
-    def _init(self, X, lengths=None):
+    def _init(self, X, lengths, token2cluster):
         """
         Initialize model parameters prior to fitting.
 
@@ -835,14 +836,15 @@ class CategoricalHMM(BaseEstimator):
             Feature matrix of individual samples.
         """
         self._check_and_set_n_features(X)
+        self.n_clusters = max(token2cluster) + 1
+        assert self.n_states % self.n_clusters == 0, (
+            "n_components must be divisible by n_clusters"
+        )
         self.n_emit_components = self.n_states // self.n_clusters
         random_state = check_random_state(self.random_state)
 
         if self._needs_init("e", "emissionprob_"):
-            self.clusters_offset = np.sort(
-                np.random.choice(self.n_clusters, self.n_tokens)
-                * self.n_emit_components
-            )
+            self.clusters_offset = token2cluster * self.n_emit_components
             self.cluster2tokens = [
                 np.where(self.clusters_offset == i * self.n_emit_components)[0]
                 for i in range(self.n_clusters)
@@ -853,8 +855,7 @@ class CategoricalHMM(BaseEstimator):
             normalize_by_indexes(self.emissionprob_, self.cluster2tokens, axis=1)
 
         if self._needs_init("s", "startprob_"):
-            # init = 1.0 / self.n_emit_components
-            init = 1.0
+            init = 1.0 / self.n_emit_components
             self.startprob_ = np.array(
                 list(
                     random_state.dirichlet(np.full(self.n_emit_components, init))
@@ -871,7 +872,7 @@ class CategoricalHMM(BaseEstimator):
 
         if self._needs_init("t", "transmat_"):
             alpha = 1e-3
-            init = 1.0 / self.n_states + alpha
+            init = (1.0 / self.n_states) + alpha
             self.transmat_ = random_state.dirichlet(
                 np.full(self.n_states, init), size=self.n_states
             )
